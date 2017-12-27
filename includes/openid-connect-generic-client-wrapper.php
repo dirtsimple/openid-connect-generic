@@ -151,7 +151,7 @@ class OpenID_Connect_Generic_Client_Wrapper {
 			wp_logout();
 
 			if ( $this->settings->redirect_on_logout ) {
-				$this->error_redirect( new WP_Error( 'access-token-expired', __( 'Session expired. Please login again.' ) ) );
+				$this->redirect_on_error( new WP_Error( 'access-token-expired', __( 'Session expired. Please login again.' ) ) );
 			}
 
 			return;
@@ -161,14 +161,14 @@ class OpenID_Connect_Generic_Client_Wrapper {
 		
 		if ( is_wp_error( $token_result ) ) {
 			wp_logout();
-			$this->error_redirect( $token_result );
+			$this->redirect_on_error( $token_result );
 		}
 
 		$token_response = $this->client->get_token_response( $token_result );
 
 		if ( is_wp_error( $token_response ) ) {
 			wp_logout();
-			$this->error_redirect( $token_response );
+			$this->redirect_on_error( $token_response );
 		}
 
 		return $this->update_session_info($user_id, $refresh_token_info, $token_response );
@@ -236,12 +236,13 @@ class OpenID_Connect_Generic_Client_Wrapper {
 	}
 
 	/**
-	 * Handle errors by redirecting the user to the login form
-	 *  along with an error code
+	 * Check if parameter is an error, and return it if not. Handle errors
+	 * by redirecting the user to the login form along with an error code.
 	 *
-	 * @param $error WP_Error
+	 * @param $maybe_error WP_Error|any
 	 */
-	function error_redirect( $error, $redirect = null) {
+	function redirect_on_error( $maybe_error, $redirect = null) {
+		if ( ! is_wp_error($maybe_error) ) return $maybe_error;
 		if ( $GLOBALS['pagenow'] == 'wp-login.php' && isset( $_GET[ 'action' ] ) && $_GET[ 'action' ] === 'logout' ) {
 			// Never redirect a login to the logout page
 			$redirect = '';
@@ -249,13 +250,13 @@ class OpenID_Connect_Generic_Client_Wrapper {
 			$redirect = $this->settings->redirect_user_back ? home_url( esc_url( add_query_arg( NULL, NULL ) ) ) : '';
 		}
 
-		$this->logger->log( $error );
+		$this->logger->log( $maybe_error );
 		
 		// redirect user back to login page
 		$redirect = add_query_arg(
 			array(
-				'login-error' => $error->get_error_code(),
-				'message' => urlencode( $error->get_error_message() )
+				'login-error' => $maybe_error->get_error_code(),
+				'message' => urlencode( $maybe_error->get_error_message() )
 			),
 			wp_login_url($redirect)
 		);
@@ -347,39 +348,10 @@ class OpenID_Connect_Generic_Client_Wrapper {
 		// start the authentication flow
 		list ($state, $redirect_url) = $client->get_state_and_redirect_from_auth_request( $_GET );
 
-		$authentication_request = $client->validate_authentication_request( $_GET );
-		if ( is_wp_error( $authentication_request ) ){
-			$this->error_redirect( $authentication_request, $redirect_url );
-		}
+		$authentication_request = $this->redirect_on_error( $client->validate_authentication_request( $_GET ), $redirect_url );
 
-		// retrieve the authentication code from the authentication request
-		$code = $client->get_authentication_code( $authentication_request );
-		
-		if ( is_wp_error( $code ) ){
-			$this->error_redirect( $code, $redirect_url );
-		}
-
-		// attempting to exchange an authorization code for an authentication token
-		$token_result = $client->request_authentication_token( $code );
-		
-		if ( is_wp_error( $token_result ) ) {
-			$this->error_redirect( $token_result, $redirect_url );
-		}
-
-		// get the decoded response from the authentication request result
-		$token_response = $client->get_token_response( $token_result );
-
-		if ( is_wp_error( $token_response ) ){
-			$this->error_redirect( $token_response, $redirect_url );
-		}
-
-		// ensure the that response contains required information
-		$valid = $client->validate_token_response( $token_response );
-		
-		if ( is_wp_error( $valid ) ) {
-			$this->error_redirect( $valid, $redirect_url );
-		}
-
+		// retrieve the authentication code from the authentication request and exchange for an auth token
+		$token_response = $this->redirect_on_error( $client->get_authentication_token( $authentication_request ), $redirect_url );
 		/**
 		 * End authentication
 		 * -
@@ -388,33 +360,11 @@ class OpenID_Connect_Generic_Client_Wrapper {
 		// The id_token is used to identify the authenticated user, e.g. for SSO.
 		// The access_token must be used to prove access rights to protected resources
 		// e.g. for the userinfo endpoint
-		$id_token_claim = $client->get_id_token_claim( $token_response );
-		
-		if ( is_wp_error( $id_token_claim ) ){
-			$this->error_redirect( $id_token_claim, $redirect_url );
-		}
-		
-		// validate our id_token has required values
-		$valid = $client->validate_id_token_claim( $id_token_claim );
-		
-		if ( is_wp_error( $valid ) ){
-			$this->error_redirect( $valid, $redirect_url );
-		}
+		$id_token_claim = $this->redirect_on_error( $client->get_id_token_claim( $token_response ), $redirect_url );
 		
 		// exchange the token_response for a user_claim
-		$user_claim = $client->get_user_claim( $token_response );
+		$user_claim = $this->redirect_on_error( $client->get_user_claim( $token_response, $id_token_claim ), $redirect_url );
 		
-		if ( is_wp_error( $user_claim ) ){
-			$this->error_redirect( $user_claim, $redirect_url );
-		}
-		
-		// validate our user_claim has required values
-		$valid = $client->validate_user_claim( $user_claim, $id_token_claim );
-		
-		if ( is_wp_error( $valid ) ){
-			$this->error_redirect( $valid, $redirect_url );
-		}
-
 		/**
 		 * End authorization
 		 * -
@@ -425,11 +375,7 @@ class OpenID_Connect_Generic_Client_Wrapper {
 
 		// if we didn't find an existing user, we'll need to create it
 		if ( ! $user ) {
-			$user = $this->create_new_user( $subject_identity, $user_claim );
-			if ( is_wp_error( $user ) ) {
-				$this->error_redirect( $user, $redirect_url );
-				return;
-			}
+			$user = $this->redirect_on_error( $this->create_new_user( $subject_identity, $user_claim ), $redirect_url );
 		}
 		else {
 			// allow plugins / themes to take action using current claims on existing user (e.g. update role)
@@ -437,12 +383,8 @@ class OpenID_Connect_Generic_Client_Wrapper {
 		}
 
 		// validate the found / created user
-		$valid = $this->validate_user( $user );
+		$valid = $this->redirect_on_error( $this->validate_user( $user ), $redirect_url );
 		
-		if ( is_wp_error( $valid ) ){
-			$this->error_redirect( $valid, $redirect_url );
-		}
-
 		// login the found / created user
 		$this->login_user( $user, $token_response, $id_token_claim, $user_claim, $subject_identity  );
 		

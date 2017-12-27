@@ -93,14 +93,14 @@ class OpenID_Connect_Generic_Client {
 	}
 	
 	/**
-	 * Get the authorization code from the request
+	 * Turn a request into an authorization token, by way of the idP
 	 *
 	 * @param $request array
 	 *
-	 * @return string|\WP_Error
+	 * @return array|\WP_Error
 	 */
-	function get_authentication_code( $request ){
-		return $request['code'];
+	function get_authentication_token( $request ){
+		return $this->request_authentication_token( $request['code'] );
 	}
 
 	/**
@@ -136,9 +136,9 @@ class OpenID_Connect_Generic_Client {
 
 		if ( is_wp_error( $response ) ){
 			$response->add( 'request_authentication_token' , __( 'Request for authentication token failed.' ) );
+			return $response;
 		}
-		
-		return $response;
+		return $this->get_token_response($response);
 	}
 
 	/**
@@ -193,8 +193,8 @@ class OpenID_Connect_Generic_Client {
 			}
 			return new WP_Error( $error, $error_description, $token_result );
 		}
-
-		return $token_response;
+		$err = $this->validate_token_response($token_response);
+		return is_wp_error($err) ? $err : $token_response;
 	}
 
 	
@@ -328,8 +328,9 @@ class OpenID_Connect_Generic_Client {
 
 		// Extract the id_token's claims from the token
 		$id_token_claim = json_decode( base64_decode( $tmp[1] ), TRUE );
-		
-		return $id_token_claim;
+
+		$err = $this->validate_id_token_claim($id_token_claim);
+		return is_wp_error($err) ? $err : $id_token_claim;
 	}
 
 	/**
@@ -359,7 +360,7 @@ class OpenID_Connect_Generic_Client {
 	 * 
 	 * @return array|mixed|object|\WP_Error
 	 */
-	function get_user_claim( $token_response ){
+	function get_user_claim( $token_response, $id_token_claim ){
 		// send a userinfo request to get user claim
 		$user_claim_result = $this->request_userinfo( $token_response['access_token'] );
 
@@ -370,7 +371,8 @@ class OpenID_Connect_Generic_Client {
 
 		$user_claim = json_decode( $user_claim_result['body'], TRUE );
 
-		return $user_claim;
+		$err = $this->validate_user_claim($user_claim, $id_token_claim);
+		return is_wp_error($err) ? $err : $user_claim;
 	}
 	
 	/**
