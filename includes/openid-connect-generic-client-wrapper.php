@@ -266,15 +266,6 @@ class OpenID_Connect_Generic_Client_Wrapper {
 	}
 
 	/**
-	 * Get the current error state
-	 *
-	 * @return bool | WP_Error
-	 */
-	function get_error(){
-		return $this->error;
-	}
-	
-	/**
 	 * Add the end_session endpoint to WP core's whitelist of redirect hosts
 	 *
 	 * @param array $allowed
