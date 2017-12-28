@@ -193,8 +193,14 @@ class OpenID_Connect_Generic_Client {
 			}
 			return new WP_Error( $error, $error_description, $token_result );
 		}
-		$err = $this->validate_token_response($token_response);
-		return is_wp_error($err) ? $err : $token_response;
+		// we need to ensure 3 specific items exist with the token response in order
+		// to proceed with confidence:  id_token, access_token, and token_type == 'Bearer'
+		if ( ! isset( $token_response['id_token'] ) || ! isset( $token_response['access_token'] ) ||
+		     ! isset( $token_response['token_type'] ) || strcasecmp( $token_response['token_type'], 'Bearer' )
+		) {
+			return new WP_Error( 'invalid-token-response', 'Invalid token response', $token_response );
+		}
+		return $token_response;
 	}
 
 	
@@ -288,25 +294,6 @@ class OpenID_Connect_Generic_Client {
 	}
 
 	/**
-	 * Ensure that the token meets basic requirements
-	 * 
-	 * @param $token_response
-	 *
-	 * @return bool|\WP_Error
-	 */
-	function validate_token_response( $token_response ){
-		// we need to ensure 3 specific items exist with the token response in order
-		// to proceed with confidence:  id_token, access_token, and token_type == 'Bearer'
-		if ( ! isset( $token_response['id_token'] ) || ! isset( $token_response['access_token'] ) ||
-		     ! isset( $token_response['token_type'] ) || strcasecmp( $token_response['token_type'], 'Bearer' )
-		) {
-			return new WP_Error( 'invalid-token-response', 'Invalid token response', $token_response );
-		}
-		
-		return true;
-	}
-
-	/**
 	 * Extract the id_token_claim from the token_response
 	 * 
 	 * @param $token_response
@@ -329,18 +316,6 @@ class OpenID_Connect_Generic_Client {
 		// Extract the id_token's claims from the token
 		$id_token_claim = json_decode( base64_decode( $tmp[1] ), TRUE );
 
-		$err = $this->validate_id_token_claim($id_token_claim);
-		return is_wp_error($err) ? $err : $id_token_claim;
-	}
-
-	/**
-	 * Ensure the id_token_claim contains the required values
-	 * 
-	 * @param $id_token_claim
-	 *
-	 * @return bool|\WP_Error
-	 */
-	function validate_id_token_claim( $id_token_claim ){
 		if ( ! is_array( $id_token_claim ) ) {
 			return new WP_Error( 'bad-id-token-claim', __( 'Bad ID token claim' ), $id_token_claim );
 		}
@@ -350,7 +325,7 @@ class OpenID_Connect_Generic_Client {
 			return new WP_Error( 'no-subject-identity', __( 'No subject identity' ), $id_token_claim );
 		}
 		
-		return true;
+		return $id_token_claim;
 	}
 
 	/**
@@ -371,20 +346,6 @@ class OpenID_Connect_Generic_Client {
 
 		$user_claim = json_decode( $user_claim_result['body'], TRUE );
 
-		$err = $this->validate_user_claim($user_claim, $id_token_claim);
-		return is_wp_error($err) ? $err : $user_claim;
-	}
-	
-	/**
-	 * Make sure the user_claim has all required values, and that the subject
-	 * identity matches of the id_token matches that of the user_claim.
-	 * 
-	 * @param $user_claim
-	 * @param $id_token_claim
-	 *
-	 * @return \WP_Error
-	 */
-	function validate_user_claim( $user_claim, $id_token_claim ) {
 		// must be an array
 		if ( ! is_array( $user_claim ) ){
 			return new WP_Error( 'invalid-user-claim', __( 'Invalid user claim' ), $user_claim );
@@ -402,7 +363,7 @@ class OpenID_Connect_Generic_Client {
 			return new WP_Error( 'unauthorized', __( 'Unauthorized access' ), $login_user );
 		}
 		
-		return true;
+		return $user_claim;
 	}
 
 	/**
