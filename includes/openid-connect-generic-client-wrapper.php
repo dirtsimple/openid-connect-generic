@@ -13,10 +13,6 @@ class OpenID_Connect_Generic_Client_Wrapper {
 	// id_token of the current user session; used to generate logout redirect
 	private $last_id_token;
 
-	// WP_Error if there was a problem, or false if no error
-	private $error = false;
-
-	
 	/**
 	 * Inject necessary objects and services into the client
 	 * 
